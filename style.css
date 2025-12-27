@@ -34,9 +34,10 @@ body {
     color: var(--text-primary);
     font-family: var(--font-main);
     min-height: 100vh;
+    min-height: 100dvh;
     display: flex;
     flex-direction: column;
-    overflow-x: hidden;
+    overflow: hidden; /* Prevent body scroll, screens handle their own scroll */
     line-height: 1.6;
 }
 
@@ -64,13 +65,23 @@ body {
 }
 
 .app-container {
-    max-width: 800px; /* Slightly wider for better library layout */
+    max-width: 800px;
     margin: 0 auto;
-    padding: var(--space-lg) var(--space-md);
+    padding: var(--space-md);
     width: 100%;
+    height: 100vh;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+#app-main {
     flex: 1;
     display: flex;
     flex-direction: column;
+    overflow: hidden;
+    position: relative;
 }
 
 header {
@@ -113,7 +124,11 @@ h1 {
 /* Screen Transitions */
 .screen {
     display: none;
+    height: 100%;
+    flex-direction: column;
     animation: fadeIn 0.5s ease-out forwards;
+    overflow-y: auto;
+    padding-bottom: var(--space-lg);
 }
 
 .screen.active {
@@ -661,28 +676,113 @@ input[type="range"] {
 
 /* Mobile Adjustments */
 @media (max-width: 480px) {
-    h1 { font-size: 2rem; }
-    .reader-container { padding: 1.5rem; }
-    .reading-content { font-size: 1.4rem; }
-    .button.primary { padding: 1rem 2rem; }
-    .settings-bar { 
-        flex-direction: column; 
-        gap: 1.25rem; 
-        align-items: stretch;
-        padding: 1.25rem;
+    :root {
+        --space-md: 16px;
+        --space-lg: 24px;
     }
-    .settings-bar > div {
+
+    .app-container {
+        padding: var(--space-sm);
+    }
+
+    h1 { font-size: 1.8rem; }
+    .subtitle { font-size: 0.75rem; }
+
+    header {
+        margin-bottom: var(--space-md);
+    }
+
+    .reader-active header {
+        display: none !important;
+    }
+
+    /* Library Fixes */
+    .pdf-grid {
+        grid-template-columns: 1fr;
+    }
+
+    /* Reader Screen - App Style */
+    #reader-screen {
+        display: none;
+        flex-direction: column;
+        height: 100%;
+        padding-bottom: 0;
+        overflow: hidden;
+    }
+
+    #reader-screen.active {
         display: flex;
-        justify-content: space-between;
-        width: 100%;
     }
-    .primary-controls { gap: 1rem; margin-top: 1rem; }
-    .button { padding: 0.75rem 1rem; font-size: 0.8rem; }
-    .button.nav-btn { padding: 0.6rem 0.8rem; }
-    .keyboard-hint { display: none !important; }
+
+    .reader-container { 
+        flex: 1;
+        height: auto;
+        min-height: 0;
+        margin-bottom: var(--space-sm);
+        padding: 1.5rem;
+        border-radius: 24px;
+    }
+
+    .reading-content { 
+        font-size: 1.5rem;
+        padding: 1rem 0;
+    }
+
+    .controls-panel {
+        margin-top: 0;
+        background: var(--glass-bg);
+        backdrop-filter: blur(20px);
+        margin: 0 -16px; /* Bleed to edges */
+        padding: var(--space-xs) 16px env(safe-area-inset-bottom, 16px);
+        border-top: 1px solid var(--surface-border);
+        border-radius: 24px 24px 0 0;
+        gap: 0.75rem;
+        z-index: 10;
+        flex-shrink: 0;
+    }
+
+    .controls-handle {
+        width: 36px;
+        height: 4px;
+        background: var(--surface-border);
+        border-radius: 2px;
+        margin: 0 auto var(--space-xs) auto;
+        opacity: 0.5;
+    }
+
+    .settings-bar { 
+        padding: 0.75rem;
+        background: rgba(255,255,255,0.03);
+        border: none;
+        gap: 0.5rem;
+    }
+
+    .settings-bar > div {
+        flex: 1;
+        justify-content: center;
+        font-size: 0.8rem;
+    }
     
-    .reader-container { height: 350px; padding: 1.5rem; }
-    .reading-content { font-size: 1.4rem; }
+    .speed-control { gap: 0.5rem; }
+    .speed-control input { width: 80px; }
+
+    .primary-controls { 
+        gap: 1.25rem; 
+        justify-content: space-evenly;
+    }
+
+    .button.primary.round {
+        width: 64px;
+        height: 64px;
+        font-size: 1.5rem;
+    }
+
+    .button.nav-btn {
+        padding: 0.6rem 1rem;
+        background: rgba(255,255,255,0.05);
+    }
+
+    .keyboard-hint { display: none !important; }
 }
 
 /* Mute Toggle in Reader */

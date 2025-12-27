@@ -28,7 +28,8 @@ const state = {
     autoAdvance: false,
     autoAdvanceTimer: null,
     selectedVoiceURI: null,
-    currentUtterance: null
+    currentUtterance: null,
+    lastUserScroll: 0
 };
 
 
@@ -142,6 +143,11 @@ elements.musicOptions.forEach(opt => {
         handleMusicChange(); 
     });
 });
+
+// Track manual scrolling to avoid fighting with auto-scroll
+document.getElementById('reading-content').addEventListener('wheel', () => state.lastUserScroll = Date.now());
+document.getElementById('reading-content').addEventListener('touchmove', () => state.lastUserScroll = Date.now());
+document.getElementById('reading-content').addEventListener('mousedown', () => state.lastUserScroll = Date.now());
 
 
 
@@ -323,6 +329,7 @@ async function startReading(pageIndex) {
     // Prepare UI
     hideAllScreens();
     elements.readerScreen.classList.add('active');
+    document.querySelector('.app-container').classList.add('reader-active');
 
     
     renderWords();
@@ -438,7 +445,11 @@ function playWithSpeech() {
             
             const currentWordEl = document.getElementById(`word-${state.currentIndex}`);
             if (currentWordEl) {
-                currentWordEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                // Only auto-scroll if the user hasn't scrolled manually in the last 2 seconds
+                const now = Date.now();
+                if (now - state.lastUserScroll > 2000) {
+                    currentWordEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
             }
         }
     };
@@ -530,7 +541,10 @@ function nextWord() {
         
         const currentWordEl = document.getElementById(`word-${state.currentIndex}`);
         if (currentWordEl) {
-            currentWordEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            const now = Date.now();
+            if (now - state.lastUserScroll > 2000) {
+                currentWordEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
         }
     }
 }
@@ -606,6 +620,7 @@ function updateProgress() {
 
 function hideAllScreens() {
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    document.querySelector('.app-container').classList.remove('reader-active');
 }
 
 function showImportScreen() {
