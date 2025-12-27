@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Readingale | Night Light Reader</title>
+      <meta name="description"
+            content="Improve your reading speed and pronunciation with our karaoke-style PDF reader.">
+      <link rel="stylesheet" href="style.css">
+      <link rel="preconnect" href="https://fonts.googleapis.com">
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;800&display=swap" rel="stylesheet">
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+</head>
+
+<body>
+      <div class="app-container">
+            <header>
+                  <div class="header-content">
+                        <div class="brand">
+                              <h1>readingale</h1>
+                              <p class="subtitle">Focus • Flow • Fluency</p>
+                        </div>
+                        <button class="button icon-btn" id="open-settings" title="Settings">⚙️</button>
+                  </div>
+            </header>
+
+            <main id="app-main">
+                  <!-- Screen 0: Library -->
+                  <section id="library-screen" class="screen">
+                        <div class="section-header">
+                              <h2>Your Library</h2>
+                              <div class="header-actions">
+                                    <button class="button secondary" id="new-import-btn">+ Import New</button>
+                              </div>
+                        </div>
+
+                        <div class="pdf-grid" id="pdf-library">
+                              <!-- PDFs will be listed here -->
+                        </div>
+                  </section>
+
+                  <!-- Screen 1: Import -->
+                  <section id="import-screen" class="screen active">
+                        <label for="file-input" class="upload-card" id="drop-zone">
+                              <span class="upload-icon">✦</span>
+                              <div class="upload-text">
+                                    <h3>Import your story</h3>
+                                    <p>Select a PDF to start your reading journey</p>
+                              </div>
+                        </label>
+                        <input type="file" id="file-input" accept="application/pdf">
+                  </section>
+
+                  <!-- Screen 2: Selection -->
+                  <section id="selection-screen" class="screen">
+                        <div class="section-title">
+                              <h2>Select a Page</h2>
+                              <p>Choose where to start reading from</p>
+                        </div>
+                        <div class="page-list" id="page-list">
+                              <!-- Pages will be injected here -->
+                        </div>
+                        <div class="controls-panel">
+                              <button class="button primary" id="confirm-selection" disabled>Continue</button>
+                              <button class="button secondary" onclick="location.reload()">Back</button>
+                        </div>
+                  </section>
+
+                  <!-- Screen 3: Reader -->
+                  <section id="reader-screen" class="screen">
+                        <div class="reader-container">
+                              <div class="reading-content" id="reading-content">
+                                    <div class="word-box" id="word-box">
+                                          <!-- Words will be injected here -->
+                                    </div>
+                              </div>
+                        </div>
+
+                        <div class="controls-panel">
+                              <div class="settings-bar">
+                                    <div class="speed-control">
+                                          <span>Speed (WPM)</span>
+                                          <input type="range" id="speed-range" min="60" max="400" value="180" step="10">
+                                          <span id="speed-value">180</span>
+                                    </div>
+                                    <div class="voice-toggle">
+                                          <label class="toggle">
+                                                <input type="checkbox" id="voice-toggle">
+                                                <span class="slider"></span>
+                                                <span class="label">Pronunciation</span>
+                                          </label>
+                                    </div>
+                                    <div class="mute-control">
+                                          <button id="mute-btn" class="mute-btn" title="Toggle Music">🔊</button>
+                                    </div>
+                                    <div class="progress-info">
+
+                                          <span id="progress-text">Word 0/0</span>
+                                    </div>
+                              </div>
+
+                              <div class="primary-controls">
+                                    <button class="button nav-btn" id="prev-page-btn" disabled>← Prev</button>
+                                    <button class="button secondary" id="reset-btn">Reset</button>
+                                    <button class="button primary round" id="start-btn">▶</button>
+                                    <button class="button secondary" id="exit-btn">Exit</button>
+                                    <button class="button nav-btn" id="next-page-btn" disabled>Next →</button>
+                              </div>
+                              <p class="keyboard-hint"
+                                    style="text-align: center; font-size: 0.8rem; color: var(--text-secondary);">
+                                    Press <strong>SPACE</strong> to Play/Pause
+                              </p>
+
+                        </div>
+                  </section>
+            </main>
+      </div>
+
+      <!-- Hidden audio elements for speech synthesis if needed -->
+      <!-- Delete Modal -->
+      <div id="delete-modal" class="modal">
+            <div class="modal-content">
+                  <h3>Delete PDF?</h3>
+                  <p>Are you sure you want to remove "<span id="delete-pdf-name"></span>" from your library? This cannot
+                        be undone.</p>
+                  <div class="modal-actions">
+                        <button class="button secondary" id="cancel-delete">Cancel</button>
+                        <button class="button primary" id="confirm-delete">Delete</button>
+                  </div>
+            </div>
+      </div>
+
+      <!-- Consolidated Settings Modal -->
+      <div id="settings-modal" class="modal">
+            <div class="modal-content settings-view">
+                  <header class="settings-header">
+                        <h3>Configuration</h3>
+                        <p>Customize your reading experience</p>
+                  </header>
+
+                  <div class="settings-sections">
+                        <!-- Section: Preferences -->
+                        <section class="settings-section">
+                              <div class="section-head">
+                                    <span class="icon">⚙️</span>
+                                    <h4>Preferences</h4>
+                              </div>
+                              <div class="setting-item">
+                                    <div class="setting-info">
+                                          <label>Assistant Voice</label>
+                                          <small>Choose your preferred reading companion</small>
+                                    </div>
+                                    <select id="voice-select" class="styled-select">
+                                          <option value="default">Default System Voice</option>
+                                    </select>
+                              </div>
+                              <div class="setting-item">
+                                    <div class="setting-info">
+                                          <label>Auto-Advance</label>
+                                          <small>Automatically move to thenext page after finishing</small>
+                                    </div>
+                                    <label class="toggle">
+                                          <input type="checkbox" id="auto-advance-toggle">
+                                          <span class="slider"></span>
+                                    </label>
+                              </div>
+                        </section>
+
+                        <!-- Section: Atmosphere -->
+                        <section class="settings-section">
+                              <div class="section-head">
+                                    <span class="icon">♫</span>
+                                    <h4>Atmosphere</h4>
+                              </div>
+                              <div class="music-grid" id="music-grid">
+                                    <div class="music-option" data-value="none">🔇 None</div>
+                                    <div class="music-option" data-value="lofi">🎸 Lo-Fi Study</div>
+                                    <div class="music-option" data-value="rain">🌧 Deep Rain</div>
+                                    <div class="music-option" data-value="waves">🌊 Ocean Waves</div>
+                                    <div class="music-option" data-value="zen">🧘 Zen Garden</div>
+                                    <div class="music-option" data-value="space">🚀 Deep Space</div>
+                                    <div class="music-option" data-value="cafe">☕ Cozy Cafe</div>
+                                    <div class="music-option upload-option" id="custom-music-trigger">
+                                          <span>➕ Custom</span>
+                                          <small id="custom-track-name" class="track-name-hint">No file chosen</small>
+                                    </div>
+                              </div>
+                              <input type="file" id="custom-music-input" accept="audio/*" style="display: none;">
+                        </section>
+                  </div>
+
+                  <div class="modal-actions">
+                        <button class="button primary full-width" id="save-settings-btn">Save Changes</button>
+                  </div>
+            </div>
+      </div>
+
+      <script src="script.js"></script>
+</body>
+
+</html>
