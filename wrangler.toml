@@ -9,3 +9,7 @@ directory = "."
 binding = "DB"
 database_name = "nightingale"
 database_id = "fd92aa32-bec6-4ad7-ab31-ae79590e0356"
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "readingale-assets"

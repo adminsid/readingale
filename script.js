@@ -273,6 +273,12 @@ async function handleFileUpload(e) {
         
         await saveToDB(pdfId, arrayBuffer, pdfMeta);
         await loadPdf(arrayBuffer, pdfMeta);
+        
+        // Ensure metadata exists in cloud before uploading binary
+        await syncWithCloud();
+
+        // Background upload to R2
+        uploadToR2(pdfId, file);
     } catch (error) {
         console.error('Error loading PDF:', error);
         alert('Failed to load PDF. Please try another file.');
@@ -712,8 +718,9 @@ function renderLibrary(items) {
     items.sort((a,b) => b.lastRead - a.lastRead).forEach(item => {
         const card = document.createElement('div');
         card.className = 'pdf-card';
+        const backupIcon = item.hasBinary ? '<span class="cloud-icon" title="Backed up to cloud">☁️</span>' : '';
         card.innerHTML = `
-            <h3>${item.name}</h3>
+            <h3>${item.name} ${backupIcon}</h3>
             <div class="meta">
                 ${item.readPages.length} pages read • last seen: ${new Date(item.lastRead).toLocaleDateString()}
             </div>
@@ -733,29 +740,45 @@ async function loadFromLibrary(id) {
     const pdfReq = tx.objectStore('pdfs').get(id);
     const metaReq = tx.objectStore('meta').get(id);
     
-    Promise.all([
+    const [pdfObj, metaObj] = await Promise.all([
         new Promise(r => pdfReq.onsuccess = () => r(pdfReq.result)),
         new Promise(r => metaReq.onsuccess = () => r(metaReq.result))
-    ]).then(([pdfObj, metaObj]) => {
-        if (!pdfObj && metaObj && metaObj.content) {
-            // Book from cloud, no local PDF binary - but we have the words!
-            state.pdf = null;
-            state.pdfMeta = metaObj;
-            state.readPages = new Set(metaObj.readPages || []);
-            state.currentPdfId = metaObj.id;
-            state.words = metaObj.content;
-            state.currentIndex = -1;
-            
-            hideAllScreens();
-            elements.readerScreen.classList.add('active');
-            document.querySelector('.app-container').classList.add('reader-active');
-            renderWords();
-            updateProgress();
-            updateNavButtons();
-        } else if (pdfObj) {
-            loadPdf(pdfObj.data, metaObj);
+    ]);
+
+    if (!pdfObj && metaObj && metaObj.hasBinary) {
+        // Missing locally but in R2 - download first
+        console.log('PDF missing locally, downloading from cloud...');
+        const downloadedBlob = await downloadFromR2(metaObj.id);
+        if (downloadedBlob) {
+            const arrayBuffer = await downloadedBlob.arrayBuffer();
+            await saveToDB(metaObj.id, arrayBuffer, metaObj);
+            loadPdf(arrayBuffer, metaObj);
+        } else {
+            // Fallback to text sync if download fails
+            renderReaderFromMetadata(metaObj);
         }
-    });
+    } else if (!pdfObj && metaObj && metaObj.content) {
+        // Legacy/Text-only fallback
+        renderReaderFromMetadata(metaObj);
+    } else if (pdfObj) {
+        loadPdf(pdfObj.data, metaObj);
+    }
+}
+
+function renderReaderFromMetadata(metaObj) {
+    state.pdf = null;
+    state.pdfMeta = metaObj;
+    state.readPages = new Set(metaObj.readPages || []);
+    state.currentPdfId = metaObj.id;
+    state.words = metaObj.content;
+    state.currentIndex = -1;
+    
+    hideAllScreens();
+    elements.readerScreen.classList.add('active');
+    document.querySelector('.app-container').classList.add('reader-active');
+    renderWords();
+    updateProgress();
+    updateNavButtons();
 }
 
 let pendingDelete = null;
@@ -835,6 +858,9 @@ async function handleCustomMusicUpload(e) {
 
     saveSettings();
     handleMusicChange();
+
+    // R2 Backup for custom music
+    uploadToR2('music_' + state.syncKey, file);
 }
 
 async function saveSettings() {
@@ -891,6 +917,20 @@ async function loadSettings() {
             });
             
             handleMusicChange();
+            
+            // If custom music buffer is missing but sync key exists, try to download
+            if (state.selectedTrack === 'custom' && !state.customMusicBuffer && state.syncKey) {
+                console.log('Custom music buffer missing, checking cloud...');
+                downloadFromR2('music_' + state.syncKey).then(blob => {
+                    if (blob) {
+                        blob.arrayBuffer().then(buffer => {
+                            state.customMusicBuffer = buffer;
+                            if (state.bgMusic) handleMusicChange();
+                        });
+                    }
+                });
+            }
+
             syncWithCloud();
         }
     };
@@ -949,7 +989,8 @@ async function syncWithCloud() {
                             name: item.name,
                             lastRead: item.lastRead,
                             readPages: item.readPages,
-                            content: item.content || (localItem ? localItem.content : null)
+                            content: item.content || (localItem ? localItem.content : null),
+                            hasBinary: item.hasBinary
                         });
                         
                         // If we are currently reading this PDF, we might want to update the UI
@@ -968,6 +1009,56 @@ async function syncWithCloud() {
         console.log('Cloud sync complete');
     } catch (err) {
         console.error('Cloud sync error:', err);
+    }
+}
+
+async function uploadToR2(id, file) {
+    if (!state.syncKey) return;
+    
+    try {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('id', id);
+        formData.append('syncKey', state.syncKey);
+
+        const response = await fetch('/api/assets/upload', {
+            method: 'POST',
+            body: formData
+        });
+
+        if (response.ok) {
+            console.log(`Resource ${id} backed up to R2`);
+            // Update local metadata to show it's backed up
+            if (id.startsWith('pdf_')) {
+                const tx = state.db.transaction('meta', 'readwrite');
+                const store = tx.objectStore('meta');
+                const req = store.get(id);
+                req.onsuccess = () => {
+                    const meta = req.result;
+                    if (meta) {
+                        meta.hasBinary = true;
+                        store.put(meta);
+                        // Refresh library UI if visible
+                        if (elements.libraryScreen.classList.contains('active')) {
+                            loadLibrary();
+                        }
+                    }
+                };
+            }
+        }
+    } catch (err) {
+        console.error('R2 upload failed:', err);
+    }
+}
+
+async function downloadFromR2(id) {
+    try {
+        const response = await fetch(`/api/assets/download/${id}`);
+        if (!response.ok) throw new Error('Download failed');
+        return await response.blob();
+    } catch (err) {
+        console.error('R2 download failed:', err);
+        return null;
     }
 }
 

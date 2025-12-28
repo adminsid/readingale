@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS library (
     last_read INTEGER,
     read_pages TEXT, -- JSON array of page numbers
     content TEXT, -- JSON array of extracted words
+    has_binary INTEGER DEFAULT 0, -- Boolean: file exists in R2
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id)
 );
