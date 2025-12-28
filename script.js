@@ -223,6 +223,12 @@ elements.voiceSelect.addEventListener('change', (e) => {
     state.selectedVoiceURI = e.target.value;
     state.voice = state.synth.getVoices().find(v => v.voiceURI === state.selectedVoiceURI);
     saveSettings();
+    
+    // Immediate feedback if playing
+    if (state.isPlaying && state.isSpeaking) {
+        state.synth.cancel();
+        playWithSpeech();
+    }
 });
 
 
@@ -619,6 +625,7 @@ function updateProgress() {
 // --- Storage & Helper Logic ---
 
 function hideAllScreens() {
+    pause(); // Ensure everything stops
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
     document.querySelector('.app-container').classList.remove('reader-active');
 }
