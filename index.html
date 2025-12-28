@@ -142,6 +142,23 @@
                   </header>
 
                   <div class="settings-sections">
+                        <!-- Section: Cross-Device Sync -->
+                        <section class="settings-section">
+                              <div class="section-head">
+                                    <span class="icon">☁️</span>
+                                    <h4>Cloud Sync</h4>
+                              </div>
+                              <div class="setting-item full-width">
+                                    <div class="setting-info" style="width: 100%;">
+                                          <label>Sync Key</label>
+                                          <small>Enter a secret key to sync your library across devices</small>
+                                          <input type="text" id="sync-key-input" class="styled-select"
+                                                placeholder="e.g. my-secret-vault"
+                                                style="width: 100%; padding-right: 10px; margin-top: 8px;">
+                                    </div>
+                              </div>
+                        </section>
+
                         <!-- Section: Preferences -->
                         <section class="settings-section">
                               <div class="section-head">
@@ -188,7 +205,9 @@
                                           <small id="custom-track-name" class="track-name-hint">No file chosen</small>
                                     </div>
                               </div>
-                              <input type="file" id="custom-music-input" accept="audio/*" style="display: none;">
+                              <input type="file" id="custom-music-input"
+                                    accept=".mp3,audio/mpeg,audio/mp3,audio/wav,audio/ogg,.wav,.m4a"
+                                    style="display: none;">
                         </section>
                   </div>
 

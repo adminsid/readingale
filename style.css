@@ -287,12 +287,16 @@ h1 {
 .settings-view {
     max-width: 440px;
     width: 95%;
+    max-height: 90vh;
     background: rgba(12, 13, 18, 0.98);
     border: 1px solid var(--surface-border);
     border-radius: 24px;
     padding: var(--space-md) var(--space-lg);
     box-shadow: 0 30px 60px rgba(0,0,0,0.8);
     position: relative;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
 }
 
 .settings-header {

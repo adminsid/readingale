@@ -1,5 +1,11 @@
 name = "readingale"
+main = "src/index.js"
 compatibility_date = "2024-09-23"
 
 [assets]
 directory = "."
+
+[[d1_databases]]
+binding = "DB"
+database_name = "nightingale"
+database_id = "fd92aa32-bec6-4ad7-ab31-ae79590e0356"

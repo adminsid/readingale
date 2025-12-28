@@ -29,7 +29,8 @@ const state = {
     autoAdvanceTimer: null,
     selectedVoiceURI: null,
     currentUtterance: null,
-    lastUserScroll: 0
+    lastUserScroll: 0,
+    syncKey: null
 };
 
 
@@ -76,7 +77,8 @@ const elements = {
     deletePdfName: document.getElementById('delete-pdf-name'),
     confirmDeleteBtn: document.getElementById('confirm-delete'),
     cancelDeleteBtn: document.getElementById('cancel-delete'),
-    voiceSelect: document.getElementById('voice-select')
+    voiceSelect: document.getElementById('voice-select'),
+    syncKeyInput: document.getElementById('sync-key-input')
 };
 
 
@@ -667,6 +669,7 @@ async function updatePdfMeta() {
     state.pdfMeta.lastRead = Date.now();
     const tx = state.db.transaction('meta', 'readwrite');
     tx.objectStore('meta').put(state.pdfMeta);
+    syncWithCloud();
 }
 
 async function loadLibrary() {
@@ -808,9 +811,14 @@ async function saveSettings() {
             customBuffer: state.customMusicBuffer,
             customName: state.customMusicName,
             autoAdvance: state.autoAdvance,
-            voiceURI: state.selectedVoiceURI
+            voiceURI: state.selectedVoiceURI,
+            syncKey: elements.syncKeyInput.value.trim()
         });
-        tx.oncomplete = () => resolve();
+        tx.oncomplete = () => {
+            state.syncKey = elements.syncKeyInput.value.trim();
+            syncWithCloud();
+            resolve();
+        };
     });
 }
 
@@ -826,6 +834,7 @@ async function loadSettings() {
             state.customMusicName = set.customName;
             state.autoAdvance = set.autoAdvance || false;
             state.selectedVoiceURI = set.voiceURI;
+            state.syncKey = set.syncKey;
             
             // Sync UI
             elements.autoAdvanceToggle.checked = state.autoAdvance;
@@ -835,6 +844,9 @@ async function loadSettings() {
             if (state.customMusicName) {
                 elements.customTrackName.textContent = state.customMusicName;
             }
+            if (state.syncKey && elements.syncKeyInput) {
+                elements.syncKeyInput.value = state.syncKey;
+            }
             
             elements.musicOptions.forEach(o => {
                 if (o.dataset.value === state.selectedTrack || (state.selectedTrack === 'custom' && o.id === 'custom-music-trigger')) {
@@ -843,8 +855,79 @@ async function loadSettings() {
             });
             
             handleMusicChange();
+            syncWithCloud();
         }
     };
+}
+
+async function syncWithCloud() {
+    if (!state.syncKey) return;
+
+    try {
+        // Collect local library metadata
+        const tx = state.db.transaction('meta', 'readonly');
+        const store = tx.objectStore('meta');
+        const localLibrary = await new Promise(resolve => {
+            store.getAll().onsuccess = (e) => resolve(e.target.result);
+        });
+
+        const syncData = {
+            syncKey: state.syncKey,
+            settings: {
+                speed: state.speed,
+                voiceURI: state.selectedVoiceURI,
+                selectedTrack: state.selectedTrack,
+                autoAdvance: state.autoAdvance
+            },
+            library: localLibrary.map(item => ({
+                id: item.id,
+                name: item.name,
+                lastRead: item.lastRead,
+                readPages: item.readPages
+            }))
+        };
+
+        const response = await fetch('/api/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(syncData)
+        });
+
+        if (!response.ok) throw new Error('Sync failed');
+
+        const cloudState = await response.json();
+        
+        // Merge cloud library metadata into local IndexedDB
+        if (cloudState.library) {
+            const mtx = state.db.transaction('meta', 'readwrite');
+            const mstore = mtx.objectStore('meta');
+            for (const item of cloudState.library) {
+                // Only update locally if cloud is newer or missing locally
+                const localItemRequest = mstore.get(item.id);
+                localItemRequest.onsuccess = (e) => {
+                    const localItem = e.target.result;
+                    if (!localItem || item.lastRead > localItem.lastRead) {
+                        mstore.put({
+                            id: item.id,
+                            name: item.name,
+                            lastRead: item.lastRead,
+                            readPages: item.readPages
+                        });
+                    }
+                };
+            }
+        }
+
+        // Apply cloud settings if they differ significantly (optional refinement)
+        if (cloudState.settings) {
+            // Note: We might want to be careful here to not overwrite recent local changes
+            // For now, let's just ensure settings are loaded on app start
+        }
+
+        console.log('Cloud sync complete');
+    } catch (err) {
+        console.error('Cloud sync error:', err);
+    }
 }
 
 
