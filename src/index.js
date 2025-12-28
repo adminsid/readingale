@@ -59,12 +59,27 @@ async function handleSync(request, env) {
                 .run();
         }
 
-        // 3. Sync Library (PDF metadata)
+        // 3. Sync Library (PDF metadata & Extracted Text)
         if (library && Array.isArray(library)) {
             for (const item of library) {
-                await env.DB.prepare('INSERT INTO library (id, user_id, pdf_id, name, last_read, read_pages) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET last_read = excluded.last_read, read_pages = excluded.read_pages, updated_at = CURRENT_TIMESTAMP')
-                    .bind(item.id, userId, item.pdfId || item.id, item.name, item.lastRead, JSON.stringify(item.readPages))
+                // Fetch existing item to check lastRead
+                const existing = await env.DB.prepare('SELECT last_read FROM library WHERE id = ?')
+                    .bind(item.id)
+                    .first();
+
+                if (!existing || item.lastRead > existing.last_read) {
+                    await env.DB.prepare(`
+                        INSERT INTO library (id, user_id, pdf_id, name, last_read, read_pages, content) 
+                        VALUES (?, ?, ?, ?, ?, ?, ?) 
+                        ON CONFLICT(id) DO UPDATE SET 
+                            last_read = excluded.last_read, 
+                            read_pages = excluded.read_pages, 
+                            content = COALESCE(excluded.content, library.content),
+                            updated_at = CURRENT_TIMESTAMP
+                    `)
+                    .bind(item.id, userId, item.pdfId || item.id, item.name, item.lastRead, JSON.stringify(item.readPages), item.content ? JSON.stringify(item.content) : null)
                     .run();
+                }
             }
         }
 
@@ -85,7 +100,8 @@ async function handleSync(request, env) {
                 id: item.id,
                 name: item.name,
                 lastRead: item.last_read,
-                readPages: JSON.parse(item.read_pages)
+                readPages: JSON.parse(item.read_pages),
+                content: item.content ? JSON.parse(item.content) : null
             }))
         }), {
             headers: { 'Content-Type': 'application/json' },

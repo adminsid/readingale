@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS library (
     name TEXT,
     last_read INTEGER,
     read_pages TEXT, -- JSON array of page numbers
+    content TEXT, -- JSON array of extracted words
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id)
 );

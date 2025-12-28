@@ -108,6 +108,17 @@ elements.voiceToggle.addEventListener('change', (e) => {
     }
 });
 
+// Periodic sync (Real-time feel)
+setInterval(() => {
+    if (state.syncKey) syncWithCloud();
+}, 45000); // Pulse every 45s
+
+window.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && state.syncKey) {
+        syncWithCloud();
+    }
+});
+
 elements.prevPageBtn.addEventListener('click', () => navigatePage(-1));
 elements.nextPageBtn.addEventListener('click', () => navigatePage(1));
 elements.newImportBtn.addEventListener('click', showImportScreen);
@@ -326,12 +337,20 @@ async function startReading(pageIndex) {
         lastY = item.transform[5];
     }
     
+    // Cache the extracted words locally in metadata for cloud sync
+    state.pdfMeta.content = text.split(/\s+/).filter(word => word.trim().length > 0);
+    updatePdfMeta();
+    
     // Mark as reading
     state.readPages.add(pageIndex);
     updatePdfMeta();
     
     // Clean and split text into words while keeping punctuation
-    state.words = text.split(/\s+/).filter(word => word.trim().length > 0);
+    if (state.pdfMeta && state.pdfMeta.content) {
+        state.words = state.pdfMeta.content;
+    } else {
+        state.words = text.split(/\s+/).filter(word => word.trim().length > 0);
+    }
     state.currentIndex = -1;
     
     // Prepare UI
@@ -718,7 +737,24 @@ async function loadFromLibrary(id) {
         new Promise(r => pdfReq.onsuccess = () => r(pdfReq.result)),
         new Promise(r => metaReq.onsuccess = () => r(metaReq.result))
     ]).then(([pdfObj, metaObj]) => {
-        loadPdf(pdfObj.data, metaObj);
+        if (!pdfObj && metaObj && metaObj.content) {
+            // Book from cloud, no local PDF binary - but we have the words!
+            state.pdf = null;
+            state.pdfMeta = metaObj;
+            state.readPages = new Set(metaObj.readPages || []);
+            state.currentPdfId = metaObj.id;
+            state.words = metaObj.content;
+            state.currentIndex = -1;
+            
+            hideAllScreens();
+            elements.readerScreen.classList.add('active');
+            document.querySelector('.app-container').classList.add('reader-active');
+            renderWords();
+            updateProgress();
+            updateNavButtons();
+        } else if (pdfObj) {
+            loadPdf(pdfObj.data, metaObj);
+        }
     });
 }
 
@@ -883,7 +919,8 @@ async function syncWithCloud() {
                 id: item.id,
                 name: item.name,
                 lastRead: item.lastRead,
-                readPages: item.readPages
+                readPages: item.readPages,
+                content: item.content // Sync extracted text
             }))
         };
 
@@ -902,17 +939,21 @@ async function syncWithCloud() {
             const mtx = state.db.transaction('meta', 'readwrite');
             const mstore = mtx.objectStore('meta');
             for (const item of cloudState.library) {
-                // Only update locally if cloud is newer or missing locally
                 const localItemRequest = mstore.get(item.id);
                 localItemRequest.onsuccess = (e) => {
                     const localItem = e.target.result;
+                    // If doesn't exist locally, or cloud is newer (higher lastRead)
                     if (!localItem || item.lastRead > localItem.lastRead) {
                         mstore.put({
                             id: item.id,
                             name: item.name,
                             lastRead: item.lastRead,
-                            readPages: item.readPages
+                            readPages: item.readPages,
+                            content: item.content || (localItem ? localItem.content : null)
                         });
+                        
+                        // If we are currently reading this PDF, we might want to update the UI
+                        // but let's keep it simple for now: it will be updated next time they open the library
                     }
                 };
             }
