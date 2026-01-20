@@ -264,6 +264,69 @@ h1 {
     color: #fff;
 }
 
+/* Library Tabs */
+.library-tabs {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: var(--space-md);
+    border-bottom: 1px solid var(--surface-border);
+}
+
+.library-tab {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    padding: 0.75rem 1.25rem;
+    cursor: pointer;
+    font-weight: 600;
+    transition: var(--transition);
+    border-bottom: 2px solid transparent;
+    font-family: inherit;
+}
+
+.library-tab.active {
+    color: var(--accent-color);
+    border-bottom-color: var(--accent-color);
+}
+
+.library-container {
+    display: none;
+}
+
+.library-container.active {
+    display: block;
+    animation: fadeIn 0.3s ease-out;
+}
+
+.cloud-action-btn {
+    background: rgba(255, 204, 51, 0.1);
+    color: var(--accent-color);
+    border: 1px solid rgba(255, 204, 51, 0.3);
+    padding: 0.4rem 0.8rem;
+    border-radius: 8px;
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: var(--transition);
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+    width: fit-content;
+}
+
+.cloud-action-btn:hover {
+    background: var(--accent-color);
+    color: #000;
+    border-color: var(--accent-color);
+}
+
+.pdf-card .card-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: auto;
+}
+
 /* Modal */
 .modal {
     display: none;

@@ -72,8 +72,21 @@
                               </div>
                         </div>
 
-                        <div class="pdf-grid" id="pdf-library">
-                              <!-- PDFs will be listed here -->
+                        <div class="library-tabs">
+                              <button class="library-tab active" data-tab="local">Local Library</button>
+                              <button class="library-tab" data-tab="cloud">Cloud Library</button>
+                        </div>
+
+                        <div class="library-container active" id="local-library-view">
+                              <div class="pdf-grid" id="pdf-library">
+                                    <!-- Local PDFs will be listed here -->
+                              </div>
+                        </div>
+
+                        <div class="library-container" id="cloud-library-view">
+                              <div class="pdf-grid" id="cloud-pdf-library">
+                                    <!-- Cloud PDFs will be listed here -->
+                              </div>
                         </div>
                   </section>
 

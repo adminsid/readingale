@@ -97,11 +97,25 @@ const elements = {
     modalUsername: document.getElementById('modal-username'),
     closeProfileBtn: document.getElementById('close-profile'),
     logoutBtn: document.getElementById('logout-btn'),
-    openSettingsProfileBtn: document.getElementById('open-settings-profile')
+    openSettingsProfileBtn: document.getElementById('open-settings-profile'),
+    libraryTabs: document.querySelectorAll('.library-tab'),
+    cloudPdfLibrary: document.getElementById('cloud-pdf-library'),
+    localLibraryView: document.getElementById('local-library-view'),
+    cloudLibraryView: document.getElementById('cloud-library-view')
 };
 
 
 // --- Initialization ---
+elements.libraryTabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+        elements.libraryTabs.forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        
+        const mode = tab.dataset.tab;
+        elements.localLibraryView.classList.toggle('active', mode === 'local');
+        elements.cloudLibraryView.classList.toggle('active', mode === 'cloud');
+    });
+});
 async function apiCall(endpoint, method = 'GET', body = null) {
     if (!state.token) return null;
     
@@ -408,20 +422,15 @@ async function handleFileUpload(e) {
             id: pdfId, 
             name: file.name, 
             readPages: [], 
-            lastRead: Date.now() 
+            lastRead: Date.now(),
+            isCloud: false
         };
         
-        // 1. Save metadata to Cloud DB
-        await apiCall('/api/books', 'POST', pdfMeta);
-
-        // 2. Save to Local DB (Cache)
+        // Save to Local DB (Cache) ONLY by default now
         await saveToDB(pdfId, arrayBuffer, pdfMeta);
         
-        // 3. Load into Reader
+        // Load into Reader
         await loadPdf(arrayBuffer, pdfMeta);
-        
-        // 4. Background upload to R2
-        uploadToR2(pdfId, file);
     } catch (error) {
         console.error('Error loading PDF:', error);
         alert('Failed to load PDF. Please try another file.');
@@ -849,73 +858,171 @@ async function updatePdfMeta() {
 }
 
 async function loadLibrary() {
+    hideAllScreens();
+    elements.libraryScreen.classList.add('active');
+
+    // 1. Fetch Cloud Library
+    let cloudBooks = [];
     try {
         const response = await apiCall('/api/books');
         if (response && response.success) {
-            // Update Local Cache
-            const tx = state.db.transaction('meta', 'readwrite');
-            const store = tx.objectStore('meta');
-            // Clear existing metadata to avoid stale items? Or merge?
-            // Merging is safer for now, or just overwrite since server is truth
-            for (const item of response.library) {
-                 store.put(item);
-            }
-            // If offline, we might have items locally not on server? 
-            // For now, let's just render what we get from server + local
-            // But to keep it simple, we render from local AFTER updating from server
+            cloudBooks = response.library;
+            renderCloudLibrary(cloudBooks);
         }
     } catch (e) {
-        console.log('Offline or API error, loading from local cache');
+        console.error('Failed to fetch cloud library', e);
+        elements.cloudPdfLibrary.innerHTML = '<p class="error">Cloud offline</p>';
     }
 
+    // 2. Fetch Local Library
     const tx = state.db.transaction('meta', 'readonly');
     const store = tx.objectStore('meta');
     const request = store.getAll();
     request.onsuccess = () => {
-        const items = request.result;
-        if (items.length === 0) {
-            showImportScreen();
-            return;
-        }
-        hideAllScreens();
-        elements.libraryScreen.classList.add('active');
-        renderLibrary(items);
+        const localItems = request.result;
+        renderLocalLibrary(localItems, cloudBooks);
     };
 }
 
-function renderLibrary(items) {
+function renderLocalLibrary(items, cloudBooks) {
     elements.pdfLibrary.innerHTML = '';
+    
+    // Sort by last read
     items.sort((a,b) => b.lastRead - a.lastRead).forEach(item => {
         const card = document.createElement('div');
         card.className = 'pdf-card';
-        const backupIcon = item.hasBinary ? '<span class="cloud-icon" title="Backed up to cloud">☁️</span>' : '';
+        
+        // Check if this item is already in cloud
+        const isAlreadyInCloud = cloudBooks.some(cb => cb.id === item.id);
+        
         card.innerHTML = `
-            <h3>${item.name} ${backupIcon}</h3>
+            <h3>${item.name}</h3>
             <div class="meta">
-                ${item.readPages.length} pages read • last seen: ${new Date(item.lastRead).toLocaleDateString()}
+                ${item.readPages ? item.readPages.length : 0} pages read • Local Only
+            </div>
+            <div class="card-footer">
+                ${!isAlreadyInCloud ? `
+                <button class="cloud-action-btn upload-btn" title="Upload to Cloud">
+                    ☁️ Upload to Cloud
+                </button>` : `<span class="meta">✓ Synced</span>`}
             </div>
             <button class="delete-pdf-btn" title="Delete">×</button>
         `;
+
         card.querySelector('.delete-pdf-btn').onclick = (e) => {
             e.stopPropagation();
             showDeleteModal(item);
         };
+
+        const uploadBtn = card.querySelector('.upload-btn');
+        if (uploadBtn) {
+            uploadBtn.onclick = (e) => {
+                e.stopPropagation();
+                uploadToCloud(item);
+            };
+        }
+
         card.onclick = () => loadFromLibrary(item.id);
         elements.pdfLibrary.appendChild(card);
     });
+
+    if (items.length === 0) {
+        elements.pdfLibrary.innerHTML = '<p class="meta" style="grid-column: 1/-1; text-align: center; padding: 2rem;">No local books. Import some to get started!</p>';
+    }
 }
 
-async function loadFromLibrary(id) {
+function renderCloudLibrary(items) {
+    elements.cloudPdfLibrary.innerHTML = '';
+    
+    items.sort((a,b) => b.lastRead - a.lastRead).forEach(item => {
+        const card = document.createElement('div');
+        card.className = 'pdf-card cloud-card';
+        
+        card.innerHTML = `
+            <h3>${item.name}</h3>
+            <div class="meta">
+                ${item.readPages ? item.readPages.length : 0} pages read • On Cloud
+            </div>
+            <div class="card-footer">
+                <span class="meta">☁️ Ready to Read</span>
+            </div>
+            <button class="delete-pdf-btn" title="Delete from Cloud">×</button>
+        `;
+
+        card.querySelector('.delete-pdf-btn').onclick = (e) => {
+            e.stopPropagation();
+            // Delete from Cloud API
+            if (confirm(`Delete "${item.name}" from Cloud?`)) {
+                apiCall(`/api/books/${item.id}`, 'DELETE').then(() => loadLibrary());
+            }
+        };
+
+        card.onclick = () => loadFromLibrary(item.id, item);
+        elements.cloudPdfLibrary.appendChild(card);
+    });
+
+    if (items.length === 0) {
+        elements.cloudPdfLibrary.innerHTML = '<p class="meta" style="grid-column: 1/-1; text-align: center; padding: 2rem;">Cloud library is empty.</p>';
+    }
+}
+
+async function uploadToCloud(item) {
+    // Find the specific button for this item
+    const card = Array.from(document.querySelectorAll('#pdf-library .pdf-card'))
+                      .find(c => c.querySelector('h3').textContent.includes(item.name));
+    const btn = card ? card.querySelector('.upload-btn') : null;
+
+    try {
+        if (btn) {
+            btn.textContent = 'Uploading...';
+            btn.disabled = true;
+        }
+
+        // 1. Fetch binary data
+        const tx = state.db.transaction('pdfs', 'readonly');
+        const pdfReq = tx.objectStore('pdfs').get(item.id);
+        const pdfObj = await new Promise(r => pdfReq.onsuccess = () => r(pdfReq.result));
+
+        if (!pdfObj) throw new Error('Local PDF file not found');
+
+        // 2. Save metadata to Cloud DB (D1)
+        await apiCall('/api/books', 'POST', item);
+
+        // 3. Upload binary to Cloud Storage (R2)
+        const blob = new Blob([pdfObj.data], { type: 'application/pdf' });
+        const file = new File([blob], item.name, { type: 'application/pdf' });
+        await uploadToR2(item.id, file);
+
+        // 4. Success!
+        if (btn) btn.textContent = '✓ Synced';
+        setTimeout(() => loadLibrary(), 1000);
+    } catch (err) {
+        console.error('Cloud upload failed', err);
+        alert('Cloud upload failed: ' + err.message);
+        if (btn) {
+            btn.textContent = '☁️ Upload to Cloud';
+            btn.disabled = false;
+        }
+    }
+}
+
+async function loadFromLibrary(id, providedMeta = null) {
+    let pdfObj, metaObj;
+    
+    // 1. Try Local first
     const tx = state.db.transaction(['pdfs', 'meta'], 'readonly');
     const pdfReq = tx.objectStore('pdfs').get(id);
     const metaReq = tx.objectStore('meta').get(id);
     
-    const [pdfObj, metaObj] = await Promise.all([
+    [pdfObj, metaObj] = await Promise.all([
         new Promise(r => pdfReq.onsuccess = () => r(pdfReq.result)),
         new Promise(r => metaReq.onsuccess = () => r(metaReq.result))
     ]);
 
-    if (!pdfObj && metaObj && metaObj.hasBinary) {
+    // Use provided meta if local meta is missing
+    if (!metaObj) metaObj = providedMeta;
+
+    if (!pdfObj && metaObj && (metaObj.hasBinary || metaObj.isCloud)) {
         // Missing locally but in R2 - download first
         console.log('PDF missing locally, downloading from cloud...');
         const downloadedBlob = await downloadFromR2(metaObj.id);
@@ -1030,7 +1137,7 @@ async function handleCustomMusicUpload(e) {
     handleMusicChange();
 
     // R2 Backup for custom music
-    uploadToR2('music_' + state.syncKey, file);
+    uploadToR2('music_' + state.token, file);
 }
 
 async function saveSettings() {
