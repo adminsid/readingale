@@ -2,6 +2,8 @@
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     sync_key TEXT UNIQUE,
+    username TEXT UNIQUE,
+    pin TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 

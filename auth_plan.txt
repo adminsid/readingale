@@ -1,0 +1,8 @@
+// Auth Logic Implementation Plan for script.js
+
+// 1. Add `state.username` and `state.isLoggedIn`.
+// 2. Modify `initDB` to check for login state.
+// 3. Implement `handleAuthSubmit(e)`.
+// 4. Implement `performLogin(username, pin)` and `performSignup(username, pin)`.
+// 5. Implement `logout()`.
+// 6. Update `loadSettings` to use user-specific sync key from auth response.
