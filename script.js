@@ -1007,38 +1007,64 @@ async function uploadToCloud(item) {
 }
 
 async function loadFromLibrary(id, providedMeta = null) {
-    let pdfObj, metaObj;
-    
-    // 1. Try Local first
-    const tx = state.db.transaction(['pdfs', 'meta'], 'readonly');
-    const pdfReq = tx.objectStore('pdfs').get(id);
-    const metaReq = tx.objectStore('meta').get(id);
-    
-    [pdfObj, metaObj] = await Promise.all([
-        new Promise(r => pdfReq.onsuccess = () => r(pdfReq.result)),
-        new Promise(r => metaReq.onsuccess = () => r(metaReq.result))
-    ]);
+    // 0. Show a simple loading indicator
+    const loadingOverlay = document.createElement('div');
+    loadingOverlay.id = 'loading-overlay';
+    loadingOverlay.style = "position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); backdrop-filter:blur(10px); display:flex; align-items:center; justify-content:center; z-index:9999; color:white; font-weight:600; flex-direction:column; gap:1rem;";
+    loadingOverlay.innerHTML = '<span class="pulse" style="font-size:2rem;">✦</span><span>Retrieving your story...</span>';
+    document.body.appendChild(loadingOverlay);
 
-    // Use provided meta if local meta is missing
-    if (!metaObj) metaObj = providedMeta;
+    try {
+        let pdfObj, metaObj;
+        
+        // 1. Try Local first
+        const tx = state.db.transaction(['pdfs', 'meta'], 'readonly');
+        const pdfReq = tx.objectStore('pdfs').get(id);
+        const metaReq = tx.objectStore('meta').get(id);
+        
+        [pdfObj, metaObj] = await Promise.all([
+            new Promise(r => pdfReq.onsuccess = () => r(pdfReq.result)),
+            new Promise(r => metaReq.onsuccess = () => r(metaReq.result))
+        ]);
 
-    if (!pdfObj && metaObj && (metaObj.hasBinary || metaObj.isCloud)) {
-        // Missing locally but in R2 - download first
-        console.log('PDF missing locally, downloading from cloud...');
-        const downloadedBlob = await downloadFromR2(metaObj.id);
-        if (downloadedBlob) {
-            const arrayBuffer = await downloadedBlob.arrayBuffer();
-            await saveToDB(metaObj.id, arrayBuffer, metaObj);
-            loadPdf(arrayBuffer, metaObj);
-        } else {
-            // Fallback to text sync if download fails
-            renderReaderFromMetadata(metaObj);
+        // Use the most comprehensive metadata
+        if (providedMeta) {
+            metaObj = { ...(metaObj || {}), ...providedMeta };
         }
-    } else if (!pdfObj && metaObj && metaObj.content) {
-        // Legacy/Text-only fallback
-        renderReaderFromMetadata(metaObj);
-    } else if (pdfObj) {
-        loadPdf(pdfObj.data, metaObj);
+
+        if (!metaObj) throw new Error("Metadata missing");
+
+        // 2. If missing locally but marked as cloud, download it
+        if (!pdfObj && metaObj.hasBinary) {
+            loadingOverlay.querySelector('span:last-child').textContent = "Downloading from cloud pool...";
+            const downloadedBlob = await downloadFromR2(metaObj.id);
+            if (downloadedBlob) {
+                const arrayBuffer = await downloadedBlob.arrayBuffer();
+                // Save it locally so it's "Local Library" now too
+                metaObj.hasBinary = true; 
+                await saveToDB(metaObj.id, arrayBuffer, metaObj);
+                await loadPdf(arrayBuffer, metaObj);
+            } else {
+                throw new Error("Could not download file from cloud storage");
+            }
+        } 
+        // 3. If we have the PDF locally, just load it
+        else if (pdfObj) {
+            await loadPdf(pdfObj.data, metaObj);
+        } 
+        // 4. Fallback to text-only if possible
+        else if (metaObj.content) {
+            renderReaderFromMetadata(metaObj);
+        } 
+        else {
+            throw new Error("Book file is missing locally and not found on cloud.");
+        }
+    } catch (err) {
+        console.error("Load failed:", err);
+        alert("Failed to open book: " + err.message);
+    } finally {
+        const overlay = document.getElementById('loading-overlay');
+        if (overlay) document.body.removeChild(overlay);
     }
 }
 
