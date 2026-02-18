@@ -34,7 +34,8 @@ const state = {
     lastUserScroll: 0,
     token: null, // Replaces syncKey
     username: null,
-    isLoggedIn: false
+    isLoggedIn: false,
+    isGuestMode: false
 };
 
 
@@ -101,7 +102,14 @@ const elements = {
     libraryTabs: document.querySelectorAll('.library-tab'),
     cloudPdfLibrary: document.getElementById('cloud-pdf-library'),
     localLibraryView: document.getElementById('local-library-view'),
-    cloudLibraryView: document.getElementById('cloud-library-view')
+    cloudLibraryView: document.getElementById('cloud-library-view'),
+    // Guest Mode Elements
+    guestModeBtn: document.getElementById('guest-mode-btn'),
+    guestProfile: document.getElementById('guest-profile'),
+    guestProfileModal: document.getElementById('guest-profile-modal'),
+    closeGuestProfileBtn: document.getElementById('close-guest-profile'),
+    guestSignupBtn: document.getElementById('guest-signup-btn'),
+    openSettingsGuestBtn: document.getElementById('open-settings-guest')
 };
 
 
@@ -278,14 +286,17 @@ function handleAuthSuccess(username, token) {
     state.username = username;
     state.token = token;
     state.isLoggedIn = true;
+    state.isGuestMode = false;
 
-    // Persist session locally
+    // Clear guest mode and persist session
+    localStorage.removeItem('readingale_guest_mode');
     localStorage.setItem('readingale_user', JSON.stringify({ username, token }));
 
     // Update UI
     elements.profileUsername.textContent = username;
     elements.modalUsername.textContent = username;
     elements.loginScreen.classList.remove('active');
+    elements.guestProfile.style.display = 'none';
     
     // Header UI
     elements.userProfile.style.display = 'flex';
@@ -306,6 +317,7 @@ elements.closeProfileBtn.addEventListener('click', () => {
 elements.logoutBtn.addEventListener('click', () => {
     if (confirm('Are you sure you want to logout?')) {
         localStorage.removeItem('readingale_user');
+        localStorage.removeItem('readingale_guest_mode');
         location.reload();
     }
 });
@@ -315,7 +327,66 @@ elements.openSettingsProfileBtn.addEventListener('click', () => {
     elements.settingsModal.classList.add('active');
 });
 
+// Guest Mode Handlers
+elements.guestModeBtn.addEventListener('click', () => {
+    handleGuestMode();
+});
+
+elements.guestProfile.addEventListener('click', () => {
+    elements.guestProfileModal.classList.add('active');
+});
+
+elements.closeGuestProfileBtn.addEventListener('click', () => {
+    elements.guestProfileModal.classList.remove('active');
+});
+
+elements.guestSignupBtn.addEventListener('click', () => {
+    elements.guestProfileModal.classList.remove('active');
+    // Switch to signup tab
+    elements.authTabs.forEach(t => t.classList.remove('active'));
+    elements.authTabs[1].classList.add('active'); // Signup tab
+    authMode = 'signup';
+    elements.authSubmit.textContent = 'Sign Up';
+    elements.loginScreen.classList.add('active');
+});
+
+elements.openSettingsGuestBtn.addEventListener('click', () => {
+    elements.guestProfileModal.classList.remove('active');
+    elements.settingsModal.classList.add('active');
+});
+
+function handleGuestMode() {
+    state.isGuestMode = true;
+    state.isLoggedIn = false;
+    state.token = null;
+    state.username = 'Guest';
+    
+    // Persist guest mode preference
+    localStorage.setItem('readingale_guest_mode', 'true');
+    
+    // Update UI
+    elements.loginScreen.classList.remove('active');
+    elements.guestProfile.style.display = 'flex';
+    
+    // Load local data only
+    loadSettings();
+    loadLibraryGuestMode();
+}
+
+
 initDB().then(() => {
+    // Check for guest mode
+    const isGuest = localStorage.getItem('readingale_guest_mode');
+    if (isGuest === 'true') {
+        handleGuestMode();
+        // Also init voice list
+        if (state.synth.onvoiceschanged !== undefined) {
+            state.synth.onvoiceschanged = populateVoiceList;
+        }
+        populateVoiceList();
+        return;
+    }
+    
     // Check for existing session
     const storedUser = localStorage.getItem('readingale_user');
     if (storedUser) {
@@ -409,31 +480,48 @@ window.addEventListener('keydown', (e) => {
     }
 });
 
+
 // --- File Handling ---
 
 async function handleFileUpload(e) {
     const file = e.target.files[0];
-    if (!file || file.type !== 'application/pdf') return;
+    if (!file) return;
+    
+    // Check file type
+    const isPdf = file.type === 'application/pdf';
+    const isEpub = file.type === 'application/epub+zip' || file.name.endsWith('.epub');
+
+    if (!isPdf && !isEpub) {
+        alert('Please upload a PDF or EPUB file.');
+        return;
+    }
 
     try {
         const arrayBuffer = await file.arrayBuffer();
-        const pdfId = 'pdf_' + Date.now();
+        const timestamp = Date.now();
+        const id = isPdf ? `pdf_${timestamp}` : `epub_${timestamp}`;
+        
         const pdfMeta = { 
-            id: pdfId, 
+            id: id, 
             name: file.name, 
             readPages: [], 
-            lastRead: Date.now(),
-            isCloud: false
+            lastRead: timestamp,
+            isCloud: false,
+            type: isPdf ? 'pdf' : 'epub' // Add type tracker
         };
         
         // Save to Local DB (Cache) ONLY by default now
-        await saveToDB(pdfId, arrayBuffer, pdfMeta);
+        await saveToDB(id, arrayBuffer, pdfMeta);
         
         // Load into Reader
-        await loadPdf(arrayBuffer, pdfMeta);
+        if (isPdf) {
+            await loadPdf(arrayBuffer, pdfMeta);
+        } else {
+            await loadEpub(arrayBuffer, pdfMeta);
+        }
     } catch (error) {
-        console.error('Error loading PDF:', error);
-        alert('Failed to load PDF. Please try another file.');
+        console.error('Error loading file:', error);
+        alert('Failed to load file. Please try another one.');
     }
 }
 
@@ -449,21 +537,67 @@ async function loadPdf(arrayBuffer, meta) {
     showSelectionScreen();
 }
 
+async function loadEpub(arrayBuffer, meta) {
+    state.pdf = null; // Clear PDF state
+    state.pdfMeta = meta;
+    state.readPages = new Set(meta.readPages || []);
+    state.currentPdfId = meta.id;
+    
+    // Initialize ePub book
+    const book = ePub(arrayBuffer);
+    await book.ready;
+    state.epubBook = book; // Store book instance
+
+    // Load spine items (chapters)
+    // We'll mimic the PDF "page" structure with spine items
+    state.epubSpine = book.spine; 
+    
+    // Load voices
+    state.voice = state.synth.getVoices().find(v => v.lang.includes('en')) || state.synth.getVoices()[0];
+    
+    showSelectionScreen();
+}
+
 
 
 function showSelectionScreen() {
     hideAllScreens();
     elements.selectionScreen.classList.add('active');
 
-    
     elements.pageList.innerHTML = '';
-    for (let i = 1; i <= state.pdf.numPages; i++) {
-        const item = document.createElement('div');
-        item.className = 'page-item';
-        if (state.readPages.has(i)) item.classList.add('read');
-        item.innerHTML = `Page ${i}`;
-        item.onclick = () => selectPage(i, item);
-        elements.pageList.appendChild(item);
+    
+    if (state.pdfMeta.type === 'epub') {
+        const spine = state.epubBook.spine;
+        
+        // Iterate through spine items (sections/chapters)
+        spine.each((section, index) => {
+            // Index is 0-based, make it 1-based for UI
+            const pageIndex = index + 1;
+            
+            const item = document.createElement('div');
+            item.className = 'page-item';
+            if (state.readPages.has(pageIndex)) item.classList.add('read');
+            
+            // Try to find a label or default to Section #
+            // Some epubs have a ToC, but spine is strictly linear reading order
+            let label = `Section ${pageIndex}`;
+            if (section.label) label = section.label.trim();
+            
+            item.innerHTML = label;
+            item.onclick = () => selectPage(pageIndex, item); // Logic remains similar
+            elements.pageList.appendChild(item);
+        });
+        
+    } else {
+        // PDF Logic (unchanged)
+        for (let i = 1; i <= state.pdf.numPages; i++) {
+            const item = document.createElement('div');
+            item.className = 'page-item';
+            if (state.readPages.has(i)) item.classList.add('read');
+            item.innerHTML = `Page ${i}`;
+            item.onclick = () => selectPage(i, item);
+            elements.pageList.appendChild(item);
+        }
     }
 }
 
@@ -479,20 +613,42 @@ function selectPage(pageIndex, element) {
 
 // --- Reader Logic ---
 
+// --- Reader Logic ---
+
 async function startReading(pageIndex) {
     state.selectedPage = pageIndex;
-    const page = await state.pdf.getPage(pageIndex);
-    const textContent = await page.getTextContent();
-    
-    // Improved text extraction: maintain line breaks and spaces better
     let text = "";
-    let lastY;
-    for (let item of textContent.items) {
-        if (lastY !== undefined && lastY !== item.transform[5]) {
-            text += " \n ";
+
+    if (state.pdfMeta.type === 'epub') {
+        // EPUB Logic
+        const spineItem = state.epubSpine.get(pageIndex - 1); // 0-based
+        if (spineItem) {
+            // Render the section to a hidden element to get text
+            // Note: epub.js doesn't have a direct 'getTextContent' like pdf.js
+            // We load the item and extract text
+            await spineItem.load(state.epubBook.load.bind(state.epubBook));
+            const doc = spineItem.document;
+            if (doc) {
+                text = doc.body.innerText;
+            } else {
+                // Fallback or retry
+                text = "Error loading content.";
+            }
         }
-        text += item.str;
-        lastY = item.transform[5];
+    } else {
+        // PDF Logic
+        const page = await state.pdf.getPage(pageIndex);
+        const textContent = await page.getTextContent();
+        
+        // Improved text extraction: maintain line breaks and spaces better
+        let lastY;
+        for (let item of textContent.items) {
+            if (lastY !== undefined && lastY !== item.transform[5]) {
+                text += " \n ";
+            }
+            text += item.str;
+            lastY = item.transform[5];
+        }
     }
     
     // Cache the extracted words locally in metadata for cloud sync
@@ -523,13 +679,27 @@ async function startReading(pageIndex) {
 }
 
 function updateNavButtons() {
+    let maxPages = 0;
+    if (state.pdfMeta.type === 'epub') {
+        maxPages = state.epubSpine.length;
+    } else {
+        maxPages = state.pdf.numPages;
+    }
+    
     elements.prevPageBtn.disabled = state.selectedPage <= 1;
-    elements.nextPageBtn.disabled = state.selectedPage >= state.pdf.numPages;
+    elements.nextPageBtn.disabled = state.selectedPage >= maxPages;
 }
 
 async function navigatePage(direction, autoPlay = false) {
     const newPage = state.selectedPage + direction;
-    if (newPage >= 1 && newPage <= state.pdf.numPages) {
+    let maxPages = 0;
+    if (state.pdfMeta.type === 'epub') {
+        maxPages = state.epubSpine.length;
+    } else {
+        maxPages = state.pdf.numPages;
+    }
+
+    if (newPage >= 1 && newPage <= maxPages) {
         pause();
         state.synth.cancel(); // Ensure all speech stops
         elements.nextPageBtn.classList.remove('pulse');
@@ -692,8 +862,15 @@ function finishPage() {
     elements.startBtn.textContent = '▶';
     clearTimeout(state.timer);
     
+    let maxPages = 0;
+    if (state.pdfMeta && state.pdfMeta.type === 'epub') {
+        maxPages = state.epubSpine ? state.epubSpine.length : 0;
+    } else if (state.pdf) {
+        maxPages = state.pdf.numPages;
+    }
+
     // Visual cue for next page
-    if (state.selectedPage < state.pdf.numPages) {
+    if (state.selectedPage < maxPages) {
         elements.nextPageBtn.classList.add('pulse');
         
         // AUTO-ADVANCE LOGIC: Functional & Interruptible
@@ -849,12 +1026,14 @@ async function updatePdfMeta() {
     const tx = state.db.transaction('meta', 'readwrite');
     tx.objectStore('meta').put(state.pdfMeta);
     
-    // Save to Cloud DB
-    // Fire and forget to avoid blocking reader
-    apiCall(`/api/books/${state.pdfMeta.id}`, 'PUT', {
-        lastRead: state.pdfMeta.lastRead,
-        readPages: state.pdfMeta.readPages
-    }).catch(e => console.error('Progress save failed', e));
+    // Save to Cloud DB only if logged in (not guest mode)
+    if (state.isLoggedIn && !state.isGuestMode) {
+        // Fire and forget to avoid blocking reader
+        apiCall(`/api/books/${state.pdfMeta.id}`, 'PUT', {
+            lastRead: state.pdfMeta.lastRead,
+            readPages: state.pdfMeta.readPages
+        }).catch(e => console.error('Progress save failed', e));
+    }
 }
 
 async function loadLibrary() {
@@ -883,6 +1062,57 @@ async function loadLibrary() {
         renderLocalLibrary(localItems, cloudBooks);
     };
 }
+
+async function loadLibraryGuestMode() {
+    hideAllScreens();
+    elements.libraryScreen.classList.add('active');
+
+    // Guest mode: Only show local library, hide cloud tab
+    elements.cloudPdfLibrary.innerHTML = '<p class="meta" style="grid-column: 1/-1; text-align: center; padding: 2rem;">Sign up to sync your library to the cloud!</p>';
+    
+    // Fetch Local Library only
+    const tx = state.db.transaction('meta', 'readonly');
+    const store = tx.objectStore('meta');
+    const request = store.getAll();
+    request.onsuccess = () => {
+        const localItems = request.result;
+        renderLocalLibraryGuest(localItems);
+    };
+}
+
+function renderLocalLibraryGuest(items) {
+    elements.pdfLibrary.innerHTML = '';
+    
+    // Sort by last read
+    items.sort((a,b) => b.lastRead - a.lastRead).forEach(item => {
+        const card = document.createElement('div');
+        card.className = 'pdf-card';
+        
+        card.innerHTML = `
+            <h3>${item.name}</h3>
+            <div class="meta">
+                ${item.readPages ? item.readPages.length : 0} pages read • Local Only
+            </div>
+            <div class="card-footer">
+                <span class="meta">📱 Stored on this device</span>
+            </div>
+            <button class="delete-pdf-btn" title="Delete">×</button>
+        `;
+
+        card.querySelector('.delete-pdf-btn').onclick = (e) => {
+            e.stopPropagation();
+            showDeleteModal(item);
+        };
+
+        card.onclick = () => loadFromLibrary(item.id);
+        elements.pdfLibrary.appendChild(card);
+    });
+
+    if (items.length === 0) {
+        elements.pdfLibrary.innerHTML = '<p class="meta" style="grid-column: 1/-1; text-align: center; padding: 2rem;">No books yet. Import some to get started!</p>';
+    }
+}
+
 
 function renderLocalLibrary(items, cloudBooks) {
     elements.pdfLibrary.innerHTML = '';
@@ -1034,30 +1264,41 @@ async function loadFromLibrary(id, providedMeta = null) {
 
         if (!metaObj) throw new Error("Metadata missing");
 
-        // 2. If missing locally but marked as cloud, download it
+        console.log('Loading book:', { id, hasBinary: metaObj.hasBinary, hasLocal: !!pdfObj });
+
+        // 2. If missing locally but available in cloud, download it
         if (!pdfObj && metaObj.hasBinary) {
-            loadingOverlay.querySelector('span:last-child').textContent = "Downloading from cloud pool...";
-            const downloadedBlob = await downloadFromR2(metaObj.id);
+            loadingOverlay.querySelector('span:last-child').textContent = "Downloading from cloud storage...";
+            const downloadedBlob = await downloadFromR2(id);
             if (downloadedBlob) {
                 const arrayBuffer = await downloadedBlob.arrayBuffer();
-                // Save it locally so it's "Local Library" now too
-                metaObj.hasBinary = true; 
-                await saveToDB(metaObj.id, arrayBuffer, metaObj);
-                await loadPdf(arrayBuffer, metaObj);
+                // Save it locally so it's cached for next time
+                await saveToDB(id, arrayBuffer, metaObj);
+                
+                if (metaObj.type === 'epub' || metaObj.id.startsWith('epub_')) {
+                    await loadEpub(arrayBuffer, metaObj);
+                } else {
+                    await loadPdf(arrayBuffer, metaObj);
+                }
             } else {
-                throw new Error("Could not download file from cloud storage");
+                throw new Error("Could not download file from cloud storage. The file may not exist in R2.");
             }
         } 
-        // 3. If we have the PDF locally, just load it
+        // 3. If we have the PDF/EPUB locally, just load it
         else if (pdfObj) {
-            await loadPdf(pdfObj.data, metaObj);
+            if (metaObj.type === 'epub' || metaObj.id.startsWith('epub_')) {
+                await loadEpub(pdfObj.data, metaObj);
+            } else {
+                await loadPdf(pdfObj.data, metaObj);
+            }
         } 
         // 4. Fallback to text-only if possible
         else if (metaObj.content) {
+            console.log('Loading text-only version');
             renderReaderFromMetadata(metaObj);
         } 
         else {
-            throw new Error("Book file is missing locally and not found on cloud.");
+            throw new Error("Book file is missing locally and not found on cloud. Try uploading it again.");
         }
     } catch (err) {
         console.error("Load failed:", err);
@@ -1280,7 +1521,8 @@ async function uploadToR2(id, file) {
         if (response.ok) {
             console.log(`Resource ${id} backed up to R2`);
             // Update local metadata to show it's backed up
-            if (id.startsWith('pdf_')) {
+            // Support both PDF and EPUB
+            if (id.startsWith('pdf_') || id.startsWith('epub_')) {
                 const tx = state.db.transaction('meta', 'readwrite');
                 const store = tx.objectStore('meta');
                 const req = store.get(id);

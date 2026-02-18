@@ -237,8 +237,8 @@ async function handleAssetUpload(request, env) {
             httpMetadata: { contentType: file.type }
         });
 
-        // Update D1 only for PDFs
-        if (id.startsWith('pdf_')) {
+        // Update D1 only for PDFs and EPUBs
+        if (id.startsWith('pdf_') || id.startsWith('epub_')) {
             await env.DB.prepare('UPDATE library SET has_binary = 1 WHERE id = ? AND user_id = ?')
                 .bind(id, user.id)
                 .run();
