@@ -526,6 +526,7 @@ async function handleFileUpload(e) {
 }
 
 async function loadPdf(arrayBuffer, meta) {
+    meta.type = 'pdf'; // Enforce type
     state.pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
     state.pdfMeta = meta;
     state.readPages = new Set(meta.readPages || []);
@@ -538,6 +539,7 @@ async function loadPdf(arrayBuffer, meta) {
 }
 
 async function loadEpub(arrayBuffer, meta) {
+    meta.type = 'epub'; // Enforce type
     state.pdf = null; // Clear PDF state
     state.pdfMeta = meta;
     state.readPages = new Set(meta.readPages || []);
